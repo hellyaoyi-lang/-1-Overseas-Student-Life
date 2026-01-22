@@ -18,7 +18,3 @@ View your app in AI Studio: https://ai.studio/apps/drive/1WqNJlI1h6AC2HJDxvfAbBS
 2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
 3. Run the app:
    `npm run dev`
-
-Notes:
-- The project now uses Next.js. The Gemini API key is read server-side from `process.env.GEMINI_API_KEY` in `pages/api/genai.ts`.
-- Do NOT commit `.env.local` to source control.

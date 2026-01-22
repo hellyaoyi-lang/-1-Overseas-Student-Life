@@ -8,6 +8,7 @@ import { generateRandomEvent, generateGameEnding, generateEventImage } from './s
 import { 
   Wallet, HeartPulse, Users, Smile, BookOpen, Coffee, DollarSign, MessageSquare, Brain, Target, Trophy, Save, Sparkles, Settings, X, Volume2, VolumeX, Plane, Map, UserCircle, Camera, Loader2 
 } from 'lucide-react';
+import ErrorBanner from './components/ErrorBanner';
 
 const SAVE_KEY = 'survival_challenge_autosave_v4';
 const MAX_LOGS = 30;
@@ -62,6 +63,7 @@ const App: React.FC = () => {
   const [isEventLoading, setIsEventLoading] = useState(false);
   const [endingText, setEndingText] = useState<string>('');
   const [loading, setLoading] = useState(false);
+  const [serverError, setServerError] = useState<string | null>(null);
   const [hasSavedGame, setHasSavedGame] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
@@ -211,14 +213,27 @@ const App: React.FC = () => {
     // 【抢跑逻辑】立即发起事件生成
     if (shouldTriggerEvent) {
       setIsEventLoading(true);
-      eventPromise = generateRandomEvent(gameState.difficulty, gameState.country, gameState.week, gameState.stats, gameState.characterType);
+      try {
+        eventPromise = generateRandomEvent(gameState.difficulty, gameState.country, gameState.week, gameState.stats, gameState.characterType);
+      } catch (err: any) {
+        setIsEventLoading(false);
+        setServerError(err?.message || String(err));
+      }
     }
 
     setTimeout(async () => {
       applyConsequence(con, logMsg);
       if (shouldTriggerEvent && eventPromise) {
-        const ev = await eventPromise;
-        setCurrentEvent(ev);
+        try {
+          const ev = await eventPromise;
+          setCurrentEvent(ev);
+        } catch (err: any) {
+          setServerError(err?.message || String(err));
+          setIsEventLoading(false);
+          setLoading(false);
+          setGameState(prev => ({ ...prev, currentAction: null }));
+          return;
+        }
         setIsEventLoading(false);
         setGameState(prev => ({ ...prev, phase: 'event', currentAction: null }));
         setLoading(false);
@@ -226,7 +241,7 @@ const App: React.FC = () => {
         generateEventImage(ev.title, ev.description).then(url => {
           if (url) setCurrentEvent(prev => prev ? { ...prev, imageUrl: url } : null);
           setIsImageLoading(false);
-        });
+        }).catch((err) => { setServerError(err?.message || String(err)); setIsImageLoading(false); });
       } else {
         setLoading(false);
         setGameState(prev => ({ ...prev, currentAction: null }));
@@ -259,9 +274,15 @@ const App: React.FC = () => {
 
   const handleEndGame = async () => {
     setLoading(true);
-    const summary = await generateGameEnding(gameState);
-    setEndingText(summary);
-    setLoading(false);
+    try {
+      const summary = await generateGameEnding(gameState);
+      setEndingText(summary);
+    } catch (err: any) {
+      setServerError(err?.message || String(err));
+      setEndingText('结局生成失败。');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const renderStat = (icon: any, key: keyof GameStats, color: string, unit: string = "") => (
@@ -279,31 +300,84 @@ const App: React.FC = () => {
 
   if (gameState.phase === 'setup') {
     return (
-      <div className="flex-1 flex flex-col items-center justify-center p-2 md:p-4 bg-[#1a1a1a] w-full h-full overflow-hidden relative">
-        <PixelCard className="w-full max-w-6xl h-full md:h-auto max-h-[100dvh] flex flex-col bg-[#2d3436] overflow-hidden border-[#fab1a0] border-4 shadow-xl">
-          <div className="bg-[#fdcb6e] p-4 md:p-6 border-b-4 border-black flex items-center justify-between shrink-0">
-             <div className="flex items-center gap-3"><GameLogo /><div className="text-left animate-cute"><h1 className="text-[12px] md:text-[16px] pixel-title-sub-cute uppercase leading-none mb-1">Overseas Student Life</h1><h1 className="text-[20px] md:text-[32px] pixel-title-cute uppercase leading-none">留学生存大挑战!</h1></div></div>
-             {hasSavedGame && <button onClick={() => { const saved = localStorage.getItem(SAVE_KEY); if (saved) setGameState(JSON.parse(saved)); }} className="pixel-btn pixel-btn-primary px-4 py-2 text-xs md:px-8 md:text-lg"><Save size={18} className="mr-2"/> 载入旧档</button>}
-          </div>
-          <div className={`flex-1 flex flex-col ${isLandscape ? 'md:flex-row' : ''} overflow-hidden min-h-0`}>
-            <div className={`${isLandscape ? 'w-1/3' : 'hidden'} bg-[#636e72] border-r-4 border-black relative flex flex-col shrink-0`}><div className="flex-1 relative"><CharacterView country={gameState.country} stats={gameState.stats} characterType={gameState.characterType} currentAction={null} week={1} /></div><div className="p-4 bg-black/50 border-t-4 border-black shrink-0"><p className="text-[#fdcb6e] font-bold text-sm">【{gameState.characterType}】</p><p className="text-gray-200 text-[12px] italic">{ARCHETYPE_MODS[gameState.characterType].description}</p></div></div>
-            <div className="flex-1 flex flex-col bg-[#dfe6e9] text-black overflow-y-auto custom-scroll p-5 md:p-8 space-y-6">
-              <div className="space-y-3"><label className="block text-xs font-black uppercase text-gray-500">同学姓名</label><input type="text" value={gameState.playerName} onChange={(e) => setGameState(prev => ({ ...prev, playerName: e.target.value.slice(0, 10) }))} className="w-full border-4 border-black p-3 text-xl font-bold rounded-xl" /></div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="space-y-3"><label className="block text-xs font-black text-gray-500">学段难度</label><div className="grid grid-cols-2 gap-2">{Object.values(Difficulty).map(d => (<button key={d} onClick={() => setGameState(prev => ({ ...prev, difficulty: d }))} className={`pixel-btn py-3 text-sm ${gameState.difficulty === d ? 'pixel-btn-secondary' : 'bg-white'}`}>{d}</button>))}</div></div>
-                <div className="space-y-3"><label className="block text-xs font-black text-gray-500">留学目标</label><div className="grid grid-cols-2 gap-2">{Object.values(Country).map(c => (<button key={c} onClick={() => setGameState(prev => ({ ...prev, country: c }))} className={`pixel-btn py-3 text-sm ${gameState.country === c ? 'pixel-btn-secondary' : 'bg-white'}`}>{COUNTRY_DATA[c].flag} {c}</button>))}</div></div>
+      <>
+        <ErrorBanner message={serverError} onClose={() => setServerError(null)} />
+        <div className="flex-1 flex flex-col items-center justify-center p-2 md:p-4 bg-[#1a1a1a] w-full h-full overflow-hidden relative">
+          <PixelCard className="w-full max-w-6xl h-full md:h-auto max-h-[100dvh] flex flex-col bg-[#2d3436] overflow-hidden border-[#fab1a0] border-4 shadow-xl">
+            <div className="bg-[#fdcb6e] p-4 md:p-6 border-b-4 border-black flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-3">
+                <GameLogo />
+                <div className="text-left animate-cute">
+                  <h1 className="text-[12px] md:text-[16px] pixel-title-sub-cute uppercase leading-none mb-1">Overseas Student Life</h1>
+                  <h1 className="text-[20px] md:text-[32px] pixel-title-cute uppercase leading-none">留学生存大挑战!</h1>
+                </div>
               </div>
-              <div className="space-y-3"><label className="block text-xs font-black text-gray-500">天赋背景</label><div className="grid grid-cols-2 md:grid-cols-4 gap-3">{Object.values(CharacterArchetype).map(type => (<button key={type} onClick={() => setGameState(prev => ({ ...prev, characterType: type }))} className={`p-3 border-4 border-black rounded-xl transition-all ${gameState.characterType === type ? 'bg-pink-300 -translate-y-1' : 'bg-white'}`}>{type}</button>))}</div></div>
-              <button onClick={handleStartGame} className="w-full pixel-btn pixel-btn-danger py-5 font-black text-2xl shadow-xl">✨ 开始挑战!</button>
+              {hasSavedGame && (
+                <button onClick={() => { const saved = localStorage.getItem(SAVE_KEY); if (saved) setGameState(JSON.parse(saved)); }} className="pixel-btn pixel-btn-primary px-4 py-2 text-xs md:px-8 md:text-lg">
+                  <Save size={18} className="mr-2"/> 载入旧档
+                </button>
+              )}
             </div>
-          </div>
-        </PixelCard>
-      </div>
+
+            <div className={`flex-1 flex flex-col ${isLandscape ? 'md:flex-row' : ''} overflow-hidden min-h-0`}>
+              <div className={`${isLandscape ? 'w-1/3' : 'hidden'} bg-[#636e72] border-r-4 border-black relative flex flex-col shrink-0`}>
+                <div className="flex-1 relative">
+                  <CharacterView country={gameState.country} stats={gameState.stats} characterType={gameState.characterType} currentAction={null} week={1} />
+                </div>
+                <div className="p-4 bg-black/50 border-t-4 border-black shrink-0">
+                  <p className="text-[#fdcb6e] font-bold text-sm">【{gameState.characterType}】</p>
+                  <p className="text-gray-200 text-[12px] italic">{ARCHETYPE_MODS[gameState.characterType].description}</p>
+                </div>
+              </div>
+
+              <div className="flex-1 flex flex-col bg-[#dfe6e9] text-black overflow-y-auto custom-scroll p-5 md:p-8 space-y-6">
+                <div className="space-y-3">
+                  <label className="block text-xs font-black uppercase text-gray-500">同学姓名</label>
+                  <input type="text" value={gameState.playerName} onChange={(e) => setGameState(prev => ({ ...prev, playerName: e.target.value.slice(0, 10) }))} className="w-full border-4 border-black p-3 text-xl font-bold rounded-xl" />
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="space-y-3">
+                    <label className="block text-xs font-black text-gray-500">学段难度</label>
+                    <div className="grid grid-cols-2 gap-2">
+                      {Object.values(Difficulty).map(d => (
+                        <button key={d} onClick={() => setGameState(prev => ({ ...prev, difficulty: d }))} className={`pixel-btn py-3 text-sm ${gameState.difficulty === d ? 'pixel-btn-secondary' : 'bg-white'}`}>{d}</button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="space-y-3">
+                    <label className="block text-xs font-black text-gray-500">留学目标</label>
+                    <div className="grid grid-cols-2 gap-2">
+                      {Object.values(Country).map(c => (
+                        <button key={c} onClick={() => setGameState(prev => ({ ...prev, country: c }))} className={`pixel-btn py-3 text-sm ${gameState.country === c ? 'pixel-btn-secondary' : 'bg-white'}`}>{COUNTRY_DATA[c].flag} {c}</button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  <label className="block text-xs font-black text-gray-500">天赋背景</label>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    {Object.values(CharacterArchetype).map(type => (
+                      <button key={type} onClick={() => setGameState(prev => ({ ...prev, characterType: type }))} className={`p-3 border-4 border-black rounded-xl transition-all ${gameState.characterType === type ? 'bg-pink-300 -translate-y-1' : 'bg-white'}`}>{type}</button>
+                    ))}
+                  </div>
+                </div>
+
+                <button onClick={handleStartGame} className="w-full pixel-btn pixel-btn-danger py-5 font-black text-2xl shadow-xl">✨ 开始挑战!</button>
+              </div>
+            </div>
+          </PixelCard>
+        </div>
+      </>
     );
   }
 
   return (
-    <div className={`flex-1 flex ${isLandscape ? 'flex-row' : 'flex-col'} bg-[#121212] overflow-hidden h-full relative w-full`}>
+    <div className="app-root">
+      <ErrorBanner message={serverError} onClose={() => setServerError(null)} />
+      <div className={`flex-1 flex ${isLandscape ? 'flex-row' : 'flex-col'} bg-[#121212] overflow-hidden h-full relative w-full`}>
       {isEventLoading && <div className="fixed inset-0 z-[150] bg-black/40 flex items-center justify-center backdrop-blur-sm"><div className="bg-black/80 p-6 pixel-border border-yellow-500 flex flex-col items-center gap-4"><Loader2 className="animate-spin text-yellow-400" size={40} /><span className="text-yellow-400 font-bold uppercase tracking-widest">命运正在显影中...</span></div></div>}
       
       <div className={`${isLandscape ? 'w-[55%] h-full border-r-4 border-black' : 'h-[42dvh]'} relative flex flex-col min-h-0`}>
@@ -393,6 +467,7 @@ const App: React.FC = () => {
           </PixelCard>
         </div>
       )}
+      </div>
     </div>
   );
 };
